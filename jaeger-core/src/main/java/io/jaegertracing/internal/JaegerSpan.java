@@ -26,7 +26,12 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.logging.Logger;
 import lombok.extern.slf4j.Slf4j;
+
+// TODO: SYSCALL
+/* import com.sun.jna.Library;
+import com.sun.jna.Native; */
 
 /**
  * Represents a Span as seen from Jaeger's perspective. Builds on OpenTracing's {@link Span}, adding properties that
@@ -36,6 +41,12 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 public class JaegerSpan implements Span {
+  // TODO: SYSCALL
+  /* public interface CStdLib extends Library {
+    int syscall(int number, Object... args);
+  }
+  private CStdLib c = (CStdLib)Native.loadLibrary("c", CStdLib.class); */
+
   private final JaegerTracer tracer;
   private final long startTimeMicroseconds;
   private final long startTimeNanoTicks;
@@ -47,6 +58,9 @@ public class JaegerSpan implements Span {
   private JaegerSpanContext context;
   private List<LogData> logs;
   private boolean finished = false; // to prevent the same span from getting reported multiple times
+
+  private Logger logger;
+  private String contextAsString;
 
   protected JaegerSpan(
       JaegerTracer tracer,
@@ -69,6 +83,29 @@ public class JaegerSpan implements Span {
     for (Map.Entry<String, Object> tag : tags.entrySet()) {
       setTagAsObject(tag.getKey(), tag.getValue());
     }
+  }
+
+  protected JaegerSpan(
+      JaegerTracer tracer,
+      String operationName,
+      JaegerSpanContext context,
+      long startTimeMicroseconds,
+      long startTimeNanoTicks,
+      boolean computeDurationViaNanoTicks,
+      Map<String, Object> tags,
+      List<Reference> references,
+      Logger lttngLogger,
+      String contextAsString) {
+    this(tracer,
+         operationName,
+         context,
+         startTimeMicroseconds,
+         startTimeNanoTicks,
+         computeDurationViaNanoTicks,
+         tags,
+         references);
+    this.logger = lttngLogger;
+    this.contextAsString = contextAsString;
   }
 
   public long getStart() {
@@ -164,9 +201,19 @@ public class JaegerSpan implements Span {
   @Override
   public void finish() {
     if (computeDurationViaNanoTicks) {
+      if (context.isSampled()) {
+        if (logger != null) {
+          logger.info(contextAsString);
+        }
+      }
       long nanoDuration = tracer.clock().currentNanoTicks() - startTimeNanoTicks;
       finishWithDuration(nanoDuration / 1000);
     } else {
+      if (context.isSampled()) {
+        if (logger != null) {
+          logger.info(contextAsString);
+        }
+      }
       finish(tracer.clock().currentTimeMicros());
     }
   }
@@ -189,6 +236,11 @@ public class JaegerSpan implements Span {
 
     if (context.isSampled()) {
       tracer.reportSpan(this);
+      /*if (logger != null) {
+        logger.info(contextAsString);
+      }*/
+      // TODO: SYSCALL
+      //c.syscall(39, context.getTraceIdHigh(), context.getTraceIdLow(), context.getSpanId());
     }
   }
 
@@ -263,6 +315,9 @@ public class JaegerSpan implements Span {
         }
         if (logs == null) {
           this.logs = new ArrayList<LogData>();
+        }
+        if (event != null) {
+          logger.info(contextAsString + " " + event);
         }
         logs.add(new LogData(timestampMicroseconds, event, fields));
       }

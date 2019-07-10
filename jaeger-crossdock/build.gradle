@@ -38,3 +38,9 @@ jar {
 animalsniffer {
     sourceSets = []
 }
+
+shadowJar {
+   dependencies {
+       exclude(dependency('org.slf4j:slf4j-log4j12'))
+   }
+}

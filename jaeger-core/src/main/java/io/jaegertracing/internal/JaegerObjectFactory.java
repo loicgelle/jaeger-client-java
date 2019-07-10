@@ -16,6 +16,8 @@ package io.jaegertracing.internal;
 
 import java.util.List;
 import java.util.Map;
+import java.util.logging.Logger;
+
 
 /**
  * Implements abstract factory pattern for creating spans, span contexts, and span builders. This
@@ -44,7 +46,9 @@ public class JaegerObjectFactory {
       long startTimeNanoTicks,
       boolean computeDurationViaNanoTicks,
       Map<String, Object> tags,
-      List<Reference> references) {
+      List<Reference> references,
+      Logger lttngLogger,
+      String contextAsString) {
     return new JaegerSpan(
         tracer,
         operationName,
@@ -53,7 +57,9 @@ public class JaegerObjectFactory {
         startTimeNanoTicks,
         computeDurationViaNanoTicks,
         tags,
-        references);
+        references,
+        lttngLogger,
+        contextAsString);
   }
 
   public JaegerSpanContext createSpanContext(

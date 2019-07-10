@@ -48,6 +48,7 @@ import io.opentracing.tag.Tags;
 import io.opentracing.util.ThreadLocalScopeManager;
 import java.io.Closeable;
 import java.io.InputStream;
+import java.io.IOException;
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
@@ -60,9 +61,26 @@ import java.util.Properties;
 import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 
+import org.lttng.ust.agent.jul.LttngLogHandler;
+import java.util.logging.Logger;
+import java.util.logging.Handler;
+import java.net.Socket;
+import java.io.OutputStream;
+import java.net.UnknownHostException;
+
+// TODO: SYSCALL
+/* import com.sun.jna.Library;
+import com.sun.jna.Native; */
+
 @ToString
 @Slf4j
 public class JaegerTracer implements Tracer, Closeable {
+  // TODO: SYSCALL
+  /* public interface CStdLib extends Library {
+    int syscall(int number, Object... args);
+  }
+  private CStdLib c = (CStdLib)Native.loadLibrary("c", CStdLib.class); */
+
   private final String version;
   private final String serviceName;
   private final Reporter reporter;
@@ -71,6 +89,33 @@ public class JaegerTracer implements Tracer, Closeable {
   private final boolean zipkinSharedRpcSpan;
   private final boolean expandExceptionLogs;
   private final boolean useTraceId128Bit;
+  private final static Logger logger = Logger.getLogger(JaegerTracer.class.getName());
+  private final static Socket lttngDriverSocket;
+  static {
+    Socket socket = null;
+    try {
+      socket = new Socket("localhost", 8000);
+    } catch (UnknownHostException e) {
+      log.error("Exception occured while initializing LTTngDriver socket");
+    } catch (IOException e) {
+      log.error("Exception occured while initializing LTTngDriver socket");
+    }
+    lttngDriverSocket = socket;
+  }
+  private final static OutputStream lttngDriverSocketStream;
+  static {
+    OutputStream stream = null;
+    if (lttngDriverSocket != null) {
+      try {
+        stream = lttngDriverSocket.getOutputStream();
+      } catch(IOException e) {
+        log.error("Exception occured while requesting LTTngDriver socket output stream");
+      }
+    }
+    lttngDriverSocketStream = stream;
+  }
+
+  private long nextSocketTs = 0L;
 
   @ToString.Exclude private final PropagationRegistry registry;
   @ToString.Exclude private final Clock clock;
@@ -136,6 +181,14 @@ public class JaegerTracer implements Tracer, Closeable {
         }
       });
     }
+    try {
+      LttngLogHandler lttngUstLogHandler = new LttngLogHandler();
+      //lttngUstLogHandler.setLogSource(false);
+      logger.addHandler(lttngUstLogHandler);
+    } catch (IOException e) {
+      log.error("Could not initialize LTTng log handler: " + e.toString());
+    }
+    
   }
 
   private boolean runsInGlassFish() {
@@ -171,6 +224,21 @@ public class JaegerTracer implements Tracer, Closeable {
   }
 
   void reportSpan(JaegerSpan span) {
+    long durationMicros = span.getDuration();
+    if (durationMicros > 400000 && lttngDriverSocketStream != null) {
+      long start = span.getStart();
+      if (start > nextSocketTs) {
+        JaegerSpanContext ctx = span.context();
+        String socketReq = "snapshot " + ctx.getTraceId() + " " + String.valueOf(durationMicros);
+        try {
+          lttngDriverSocketStream.write(socketReq.getBytes());
+          lttngDriverSocketStream.flush();
+        } catch(IOException e) {
+          log.error("Exception occured while requesting to LTTngDriver socket");
+        }
+        nextSocketTs = start + durationMicros + 1500000;
+      }
+    }
     reporter.report(span);
     metrics.spansFinished.inc(1);
   }
@@ -447,6 +515,9 @@ public class JaegerTracer implements Tracer, Closeable {
         context = createChildContext();
       }
 
+      // LTTng prepare startSpan
+      String contextAsString = context.toString();
+
       long startTimeNanoTicks = 0;
       boolean computeDurationViaNanoTicks = false;
 
@@ -458,6 +529,10 @@ public class JaegerTracer implements Tracer, Closeable {
         }
       }
 
+      if (context.isSampled()) {
+        logger.info(contextAsString);
+      }
+
       JaegerSpan jaegerSpan = getObjectFactory().createSpan(
               JaegerTracer.this,
               operationName,
@@ -466,12 +541,19 @@ public class JaegerTracer implements Tracer, Closeable {
               startTimeNanoTicks,
               computeDurationViaNanoTicks,
               tags,
-              references);
+              references,
+              logger,
+              contextAsString);
       if (context.isSampled()) {
         metrics.spansStartedSampled.inc(1);
+        // LTTng log startSpan
+        //logger.info(contextAsString);
+        // TODO: SYSCALL
+        //c.syscall(39, context.getTraceIdHigh(), context.getTraceIdLow(), context.getSpanId());
       } else {
         metrics.spansStartedNotSampled.inc(1);
       }
+      
       return jaegerSpan;
     }
 

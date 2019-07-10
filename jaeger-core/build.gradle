@@ -1,10 +1,14 @@
 description = 'Core library for jaeger-client'
+apply plugin: 'com.github.johnrengelman.shadow'
 
 dependencies {
     compile group: 'io.opentracing', name: 'opentracing-api', version: opentracingVersion
     compile group: 'io.opentracing', name: 'opentracing-util', version: opentracingVersion
     compile group: 'com.google.code.gson', name: 'gson', version: gsonVersion
     compile group: 'org.slf4j', name: 'slf4j-api', version: slf4jVersion
+    compile files('/usr/share/java/lttng-ust-agent-all.jar')
+    // TODO: SYSCALL
+    //compile group: 'net.java.dev.jna', name: 'jna', version: '5.3.1'
 
     // Jersey dependencies for unit tests
     testCompile group: 'org.glassfish.jersey.test-framework.providers', name: 'jersey-test-framework-provider-grizzly2', version: jerseyVersion
@@ -39,3 +43,8 @@ task jaegerVersion {
 
 compileJava.dependsOn jaegerVersion
 
+/* shadowJar {
+   dependencies {
+       exclude(dependency('org.slf4j:slf4j-api'))
+   }
+} */
